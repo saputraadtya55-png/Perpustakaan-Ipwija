@@ -1,0 +1,112 @@
+# =========================================================
+# docker-compose.yml
+# Sistem Manajemen Buku Perpustakaan IPWIJA (MariaDB)
+# =========================================================
+
+services:
+
+  # a. Web Server / PHP Framework -> Laravel berjalan di dalam container
+  app:
+    image: webdevops/php-apache:8.4
+    container_name: ${NIM}_app
+    restart: unless-stopped
+    working_dir: /app
+    environment:
+      - WEB_DOCUMENT_ROOT=/app/public
+      - PHP_DISPLAY_ERRORS=1
+      - APP_ENV=${APP_ENV}
+    volumes:
+      - ./uaspw:/app
+    ports:
+      - "4080:80"
+    depends_on:
+      - db
+      - redis
+      - elasticsearch
+    networks:
+      - perpus_network
+
+  # b. Database Utama -> MariaDB / MySQL
+  db:
+    image: mariadb:10.11
+    container_name: ${NIM}_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE: ${DB_DATABASE}
+    ports:
+      - "${DB_PORT_EXTERNAL}:${DB_PORT_INTERNAL}"
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - perpus_network
+
+  # c. Cache & Session Store -> Redis
+  redis:
+    image: redis:7-alpine
+    container_name: ${NIM}_redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - perpus_network
+
+  # d. Search Engine -> Elasticsearch (pencarian data buku instan)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.4
+    container_name: ${NIM}_elasticsearch
+    restart: unless-stopped
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "${ELASTICSEARCH_PORT}:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    networks:
+      - perpus_network
+
+  # e. Workflow Automation -> N8N (menangani pengiriman email)
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: ${NIM}_n8n
+    restart: unless-stopped
+    environment:
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - GENERIC_TIMEZONE=${GENERIC_TIMEZONE}
+    ports:
+      - "${N8N_PORT}:5678"
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+    networks:
+      - perpus_network
+
+  # f. Ngrok -> Secure tunnel menghubungkan webhook lokal (N8N) ke public
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: ${NIM}_ngrok
+    restart: unless-stopped
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    command: http n8n:5678
+    ports:
+      - "4040:4040"
+    depends_on:
+      - n8n
+    networks:
+      - perpus_network
+
+networks:
+  perpus_network:
+    driver: bridge
+
+volumes:
+  db_data:
+  redis_data:
+  es_data:
+  n8n_data:
